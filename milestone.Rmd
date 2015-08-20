@@ -1,0 +1,140 @@
+---
+title: "Data Science Capstone Milestone Report"
+author: "Sid M"
+output: html_document
+---
+----
+## Foreword
+
+- I chose to do most of the operations in the OSX command-line terminal because R is extremely slow.
+- I made the bigrams, trigrams and tetragrams in R, but they took hours to compute.
+
+## Installation
+
+- First, we download the capstone dataset [here](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip).
+- Then, we unzip the dataset and move the files from the **/final/en_US** directory to a new **raw/** directory, which is a subdirectory of where we will be running our commands.
+- Finally, we create **processed/**, **training/**, **test/** & **validation/** subdirectories as well.
+
+## Basic Summary
+
+- We enter the **raw/** directory and run the ```$ wc``` command in the directory containing the en_US data. This gives us:
+
+| lines | words | characters | filename |
+|---|---|---|---|
+| 899288 | 37334690 | 210160014 | en_US.blogs.txt |
+| 1010242 | 34372720 | 205811889 | en_US.news.txt |
+| 2360148 | 30374206 | 167105338 | en_US.twitter.txt |
+
+- We then investigate all the files with the following commands:  
+```
+$ head en_US.twitter.txt
+$ head en_US.blogs.txt
+$ head en_US.news.txt 
+```
+- We find out that the files consist of UTF-8 encoded english text from various blogs, news sources and tweets. Each line in all the files correspond a source. There are non-ASCII characters in the text like emojis, chinese characters, etc.
+
+- We have a total of 600 MB of text, which should provide us with enough corpus to develop a natural language processing model. I don't think we might need additional data sources.
+
+## Cleaning the text (Terminal)
+
+- We keep only a subset of characters that will be useful to us to word prediction. Thus, we remove everything but ``a-z``, ``A-Z``, ``;``, ``.``, ``space`` and ``#``. (The reason we keep the ``#`` is to let us remove twitter hashtags.) We achieve the subset with ``sed "s/[^a-zA-Z#;. ]//g"``.
+- We will remove all twitter hashtags from the files. This is because twitter hash words are compound words that shouldn't be used for prediction. We achieve this with ``sed 's/#[a-zA-Z]*//g``
+- People often have a habit of using multiple periods, and we need to clean that to one period only. We achieve this with ``sed 's/\.\.*/\./g'``
+- We convert the sentences from mixed case to lower case with ``tr '[:upper:]' '[:lower:]'``
+- Periods and semicolons essentially start a new sentence, and are the start of a new chain. So, we assign those sentences to a new line. We achieve this with ``tr '.;' '\n'``
+- We clean up multiple new lines in a row with this: ``sed '/^ *$/d'``
+- We then clean up sentences that have multiple spaces in them with ``sed 's/\ [\ ]*/\ /g'``
+- We then clean up sentences that start or end with spaces with ``sed 's/^\ //g'`` & ``sed 's/\ $//g``
+- We chain all of the above to give us:
+```
+$ cat raw/en_US.twitter.txt | sed "s/[^a-zA-Z#;. ]//g" | sed 's/#[a-zA-Z]*//g' | sed 's/\.\.*/\./g' | tr '.;' '\n' | sed '/^ *$/d' | tr '[:upper:]' '[:lower:]' | sed 's/\ [\ ]*/\ /g' | sed 's/^\ //g' | sed 's/\ $//g' > processed/en_US.twitter.txt
+$ cat raw/en_US.news.txt | sed "s/[^a-zA-Z#;. ]//g" | sed 's/#[a-zA-Z]*//g' | sed 's/\.\.*/\./g' | tr '.;' '\n' | sed '/^ *$/d' | tr '[:upper:]' '[:lower:]' | sed 's/\ [\ ]*/\ /g' | sed 's/^\ //g' | sed 's/\ $//g' > processed/en_US.news.txt
+$ cat raw/en_US.blogs.txt | sed "s/[^a-zA-Z#;. ]//g" | sed 's/#[a-zA-Z]*//g' | sed 's/\.\.*/\./g' | tr '.;' '\n' | sed '/^ *$/d' | tr '[:upper:]' '[:lower:]' | sed 's/\ [\ ]*/\ /g' | sed 's/^\ //g' | sed 's/\ $//g' > processed/en_US.blogs.txt
+```
+
+- Now, we split the various files into training, validation & test sets in a 50:25:25 ratio.
+We achieve this by running the following in the shell:
+```
+$ split -l $[ $(wc -l processed/en_US.news.txt |cut -d" " -f2) * 25 / 100 ] processed/en_US.news.txt
+$ cat xaa xab > training/en_US.news.txt
+$ mv xac test/en_US.news.txt
+$ mv xad validation/en_US.news.txt
+$ rm x*
+$ split -l $[ $(wc -l processed/en_US.blogs.txt |cut -d" " -f2) * 25 / 100 ] processed/en_US.blogs.txt 
+$ cat xaa xab > training/en_US.blogs.txt
+$ mv xac test/en_US.blogs.txt
+$ mv xad validation/en_US.blogs.txt
+$ rm x*
+$ split -l $[ $(wc -l processed/en_US.twitter.txt |cut -d" " -f2) * 25 / 100 ] processed/en_US.twitter.txt
+$ cat xaa xab > training/en_US.twitter.txt
+$ mv xac test/en_US.twitter.txt
+$ mv xad validation/en_US.twitter.txt
+$ rm x*
+en_US.blogs <- readLines(con = "./final/en_US/en_US.blogs.txt", encoding = "UTF-8")
+```
+
+- Now, we have cleaned the text and split the corpus into training, test and validation sets. 
+- We are now ready to be split into mono-grams, bi-grams, tri-grams and quad-grams.
+- I choose not to remove "bad" or "swear" words because I believe them to be legitimate words that have meaning and reason. Imagine how much weaker the movie Pulp Fiction would be if Samuel L. Jackson wasn't allowed to cuss.
+- I choose not to remove stopwords because I believe they are the glue of english language and will help us predict upcoming words.
+
+## Modelling (R)
+
+- Ensure you have the following libraries available in R: **Rweka**, **tm**
+- We load the corpus and tokenise it in Bi-grams, Tri-grams and Quadra-grams in the following step. Note that this step takes hours to run, and thus we'll save the calculated results to *RData* files for future use.
+- Note how we're increasing java's memory to 8GB in this step. RWeka runs out of memory otherwise.
+- Note how we're making the machine only use a single core. RWeka fails disastrously when using multiple cores.
+
+```
+options(mc.cores=1)
+options(java.parameters = "-Xmx8g")
+
+library(RWeka)
+library(tm)
+
+bigramTokenizer  <- function(x) NGramTokenizer(x = x, control = Weka_control(min = 2, max = 2))
+trigramTokenizer <- function(x) NGramTokenizer(x = x, control = Weka_control(min = 3, max = 3))
+tetragramTokenizer <- function(x) NGramTokenizer(x = x, control = Weka_control(min = 4, max = 4))
+
+corpus <- Corpus(x = DirSource(directory = "training/"))
+
+bigram <- TermDocumentMatrix(x = corpus, control = list(tokenize = bigramTokenizer))
+trigram <- TermDocumentMatrix(x = corpus, control = list(tokenize = trigramTokenizer))
+tetragram <- TermDocumentMatrix(x = corpus, control = list(tokenize = tetragramTokenizer))
+
+save(... = bigram, file="bigram.RData")
+save(... = trigram, file="trigram.RData")
+save(... = tetragram, file="tetrgram.RData")
+```
+
+- The most common bigrams are:
+```{r, cache=TRUE}
+library(lattice)
+library(tm)
+load("bigram.RData")
+frequency <- rowSums(x = as.matrix(bigram))
+order <- order(... = frequency, decreasing = TRUE)
+barchart(frequency[head(order, 20)], col=("purple"), xlab="Frequency", main="Most common Bigrams")
+```
+
+- The most common trigrams are:
+```{r, cache=TRUE}
+load("trigram.RData")
+frequency <- rowSums(x = as.matrix(trigram))
+order <- order(... = frequency, decreasing = TRUE)
+barchart(frequency[head(order, 20)], col=("purple"), xlab="Frequency", main="Most common Trigrams")
+```
+
+- The most common tetragrams are:
+```{r, cache=TRUE}
+load("tetragram.RData")
+frequency <- rowSums(x = as.matrix(tetragram))
+order <- order(... = frequency, decreasing = TRUE)
+barchart(frequency[head(order, 20)], col=("purple"), xlab="Frequency", main="Most common Tetragrams")
+```
+
+## Building the Shiny App
+
+- The next step would involve building a model that will predict words based on the n-Grams created above. This would involve creating markov chains or similar to predict the next words.
+- We might need to go back and work on the model if the result aren't good enough, tweaking the cleaning steps, and perhaps removing stopwords.
+- Finally, we need to tie all this together into a Shiny App that will let us predict words based on inputs.
