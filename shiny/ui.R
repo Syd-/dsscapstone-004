@@ -13,13 +13,15 @@ shinyUI(pageWithSidebar(
     h4("Sid M"),
     tags$hr(),
     h6("Links"),
-    h6(tags$a(href = "https://github.com/Syd-/devdataprod-014-code", "Report")),    
-    h6(tags$a(href = "https://github.com/Syd-/devdataprod-014-code", "Github"))  
+    h6(tags$a(href = "http://rpubs.com/Syd/capstone", "Report")),    
+    h6(tags$a(href = "https://github.com/Syd-/dsscapstone-004", "Github"))  
   ),
   mainPanel(
     h3("The sentence fragment you typed:"),
     verbatimTextOutput("inputString"),
     h3("Predicted text from the fragment:"),
-    htmlOutput("predictedText")
+    htmlOutput("predictedText"),
+    tags$hr(),
+    p("Enter a sentence fragment like 'How are you' into the text box to the left, and click the Predict button.")
   )
 ))
